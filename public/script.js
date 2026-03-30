@@ -43,29 +43,33 @@ function checkMatch(userMessage) {
 
 // --- MAIN LOGIC ---
 (async function () {
-  console.log("Initializing App...");
+  console.log("Initializing WebRTC App...");
 
   let iceServers = [];
   try {
     const res = await fetch("/api/turn-credentials");
     const data = await res.json();
     iceServers = data.iceServers;
-    console.log(`TURN loaded: ${iceServers.length} servers`);
+    console.log(`TURN Loaded: ${iceServers.length} servers`);
   } catch (e) {
     console.warn("TURN Fetch failed, using default STUN");
     iceServers = [{ urls: "stun:stun.l.google.com:19302" }];
   }
 
-  const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
   const isSecure = location.protocol === 'https:';
   const peerPort = location.port ? parseInt(location.port) : (isSecure ? 443 : 80);
 
+  // Senior Configuration: iceCandidatePoolSize pre-gathers candidates 
+  // to avoid initial join silences.
   const peer = new Peer(undefined, {
     path: "/peerjs",
     host: "/",
     port: peerPort,
     secure: isSecure,
-    config: { iceServers: iceServers }
+    config: { 
+      iceServers: iceServers,
+      iceCandidatePoolSize: 10 
+    }
   });
 
   let myPeerId = null;
@@ -73,50 +77,66 @@ function checkMatch(userMessage) {
   // --- GLOBAL CALL HANDLER ---
   peer.on("call", (call) => {
     console.log(`Incoming call from: ${call.peer}`);
-    call.answer(myVideoStream); 
+    
+    // Safety check: ensure stream is ready before answering
+    if (!myVideoStream) {
+      console.warn("MediaStream not ready for incoming call. Waiting...");
+      const checkStream = setInterval(() => {
+        if (myVideoStream) {
+          clearInterval(checkStream);
+          call.answer(myVideoStream);
+          handleCallStream(call);
+        }
+      }, 100);
+      return;
+    }
 
+    call.answer(myVideoStream);
+    handleCallStream(call);
+  });
+
+  function handleCallStream(call) {
     const audio = document.createElement("audio");
-    audio.autoplay = true; 
-    audio.controls = false; 
+    audio.autoplay = true;
     
     call.on("stream", (userVideoStream) => {
+      console.log("Connected to stream from: " + call.peer);
       addVideoStream(audio, userVideoStream);
     });
-    
+
     call.on("error", (err) => console.error(`Call Error: ${err}`));
-  });
+  }
 
   peer.on("open", (id) => {
     console.log(`Peer OPEN ID: ${id}`);
     myPeerId = id;
-    joinRoom();
+    checkReadyToJoin();
   });
 
   // --- AUDIO ONLY STREAM ---
-  // Simple constraints for maximum compatibility
   navigator.mediaDevices.getUserMedia({ audio: true, video: false })
     .then((stream) => {
-      myVideoStream = stream; // Assign to global variable
-      
-      // We don't need to add our own audio to the grid (it's mute anyway)
-      // addVideoStream(myVideo, stream); 
-
+      myVideoStream = stream;
       socket.on("user-connected", (userId) => {
-        console.log(`User connected: ${userId}`);
-        connectToNewUser(userId, stream);
+        console.log(`New user detected: ${userId}`);
+        // Small delay to ensure the other side's peer object is fully ready
+        setTimeout(() => connectToNewUser(userId, stream), 500);
       });
-
-      joinRoom();
+      checkReadyToJoin();
     })
     .catch((err) => {
       console.error(`Mic Error: ${err.message}`);
       alert("Microphone failed: " + err.message);
     });
 
-  function joinRoom() {
+  // PROFESSIONAL GATING: Wait for BOTH Peer and Media to be ready
+  function checkReadyToJoin() {
     if (myPeerId && myVideoStream) {
-      console.log(`Ready to join room ${ROOM_ID}`);
-      socket.emit("join-room", ROOM_ID, myPeerId, user);
+      console.log(`Ready state achieved. Joining room ${ROOM_ID}`);
+      // Small 500ms cooling period to allow ICE gathering to start
+      setTimeout(() => {
+        socket.emit("join-room", ROOM_ID, myPeerId, user);
+      }, 500);
     }
   }
 
@@ -128,10 +148,20 @@ function checkMatch(userMessage) {
     audio.autoplay = true;
 
     call.on("stream", (userVideoStream) => {
-      console.log(`Got stream from ${userId}`);
+      console.log(`Handshake successful with ${userId}`);
       addVideoStream(audio, userVideoStream);
     });
-    call.on("close", () => audio.remove());
+
+    call.on("close", () => {
+      console.log(`Connection closed with ${userId}`);
+      audio.remove();
+    });
+
+    // Handle failed connections
+    call.on("error", (err) => {
+      console.error(`Link failure with ${userId}:`, err);
+      audio.remove();
+    });
   }
 
   // --- VIDEO/AUDIO ELEMENT HANDLER ---
