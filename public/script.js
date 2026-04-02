@@ -204,7 +204,19 @@ function checkMatch(userMessage) {
   
   let replyToMessage = null;
   
-  send.addEventListener("click", sendMessage);
+  // Prevent input focus loss when interacting with the send button to keep keyboard open
+  send.addEventListener("mousedown", (e) => e.preventDefault());
+  send.addEventListener("touchstart", (e) => {
+      e.preventDefault(); // Prevent input blur on mobile
+      sendMessage();      // Trigger explicitly since preventDefault drops the click event
+  }, { passive: false });
+
+  // Only trigger click on desktop browsers where mousedown doesn't drop the click event
+  send.addEventListener("click", (e) => {
+      e.preventDefault();
+      sendMessage();
+  });
+
   text.addEventListener("keydown", (e) => { 
       if (e.key === "Enter" && text.value.trim().length > 0) sendMessage(); 
   });
