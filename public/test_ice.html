@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head><title>WebRTC ICE Diagnostic</title></head>
+<body>
+    <h1>ICE Candidate Diagnostic</h1>
+    <pre id="logs"></pre>
+    <script>
+        const logs = document.getElementById('logs');
+        const log = (msg) => { logs.textContent += msg + '\n'; console.log(msg); };
+
+        async function testTURN() {
+            log('Fetching TURN Credentials...');
+            try {
+                const res = await fetch('/api/turn-credentials');
+                const data = await res.json();
+                log('Received ICE Servers: ' + JSON.stringify(data.iceServers, null, 2));
+
+                const pc = new RTCPeerConnection({
+                    iceServers: data.iceServers,
+                    iceTransportPolicy: 'relay' // FORCE TURN!
+                });
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        const type = event.candidate.type;
+                        const protocol = event.candidate.protocol;
+                        log(`[CANDIDATE] Found: ${type} over ${protocol.toUpperCase()}`);
+                        if (type === 'relay' && protocol === 'udp') {
+                            log('SUCCESS: Oracle UDP Relay is OPEN! Voice quality will be perfect.');
+                        } else if (type === 'relay' && protocol === 'tcp') {
+                            log('WARNING: TCP Fallback detected! UDP might be blocked.');
+                        }
+                    } else {
+                        log('Gathering completed.');
+                    }
+                };
+
+                pc.onicecandidateerror = (e) => {
+                    log(`[ERROR] Candidate Error: ${e.errorText}`);
+                }
+
+                // Create a dummy data channel to force ICE gathering
+                pc.createDataChannel('test');
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                log('Started Gathering...');
+
+                setTimeout(() => {
+                    log('\n--- DIAGNOSTIC RESULT ---');
+                    if (!logs.textContent.includes('SUCCESS')) {
+                        log('FAILED: Oracle UDP Relay is entirely blocked. You MUST open port 49152-65535 in Oracle Cloud Firewall.');
+                    }
+                }, 5000);
+
+            } catch(e) {
+                log('Error: ' + e.toString());
+            }
+        }
+        testTURN();
+    </script>
+</body>
+</html>
