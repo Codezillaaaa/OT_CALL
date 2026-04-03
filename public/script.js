@@ -104,7 +104,16 @@ function checkMatch(userMessage) {
       addVideoStream(audio, userVideoStream);
     });
 
-    call.on("error", (err) => console.error(`Call Error: ${err}`));
+    // SENIOR DEV FIX: Disconnect and remove Ghost Audio immediately when the caller hangs up
+    call.on("close", () => {
+      console.log("Incoming call stream closed. Cleaning up.");
+      audio.remove();
+    });
+
+    call.on("error", (err) => {
+      console.error(`Call Error: ${err}`);
+      audio.remove();
+    });
   }
 
   peer.on("open", (id) => {
@@ -114,7 +123,16 @@ function checkMatch(userMessage) {
   });
 
   // --- AUDIO ONLY STREAM ---
-  navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+  // SENIOR DEV FIX: Explicitly request advanced audio processing (AEC, NS, AGC) to fix voice quality, especially on Android WebViews.
+  const audioConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    sampleRate: 48000,
+    channelCount: 1
+  };
+
+  navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
     .then((stream) => {
       myVideoStream = stream;
       socket.on("user-connected", (userId) => {
