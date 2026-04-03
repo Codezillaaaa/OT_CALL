@@ -62,12 +62,25 @@ io.on("connection", (socket) => {
   socket.on("join-room", (roomId, userId, userName) => {
     socket.join(roomId);
     socket.to(roomId).broadcast.emit("user-connected", userId);
-    socket.on("message", (message) => {
-      var isDirty = profanity.isMessageDirty(message);
+    
+    // SENIOR DEV FIX: Accept timestamp and replyToMessage parameters
+    socket.on("message", (message, timestamp, replyToMessage) => {
+      // SENIOR DEV FIX: Prevent DoS crash from object-injection (if hacker sends object payload instead of string)
+      if (typeof message !== "string") return;
+
+      var isDirty = false;
+      try {
+        isDirty = profanity.isMessageDirty(message);
+      } catch (e) {
+        // Fallback silently if profanity module throws
+      }
+
       if (isDirty) {
         message = "<span style='color: red;'>🚨 Using bad word may ban your account permanantly</span>";
       }
-      io.to(roomId).emit("createMessage", message, userName);
+      
+      // Emit full payload out so the Android WebView can show the reply bubble
+      io.to(roomId).emit("createMessage", message, userName, timestamp, replyToMessage);
     });
   });
 });
