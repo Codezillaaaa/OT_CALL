@@ -62,11 +62,48 @@ app.get("/:room", (req, res) => {
   res.render("room", { roomId: req.params.room });
 });
 
+// Track room participants: roomId -> Map(userId -> userName)
+const roomUsers = new Map();
+
 io.on("connection", (socket) => {
   socket.on("join-room", (roomId, userId, userName) => {
     socket.join(roomId);
-    socket.to(roomId).broadcast.emit("user-connected", userId);
-    
+
+    if (!roomUsers.has(roomId)) {
+      roomUsers.set(roomId, new Map());
+    }
+    const usersInRoom = roomUsers.get(roomId);
+    const finalName = userName || "Guest";
+    usersInRoom.set(userId, finalName);
+    socket.userId = userId;
+    socket.roomId = roomId;
+
+    // Send existing users in room to the newly joined peer
+    const existingUsers = {};
+    usersInRoom.forEach((name, uid) => {
+      if (uid !== userId) existingUsers[uid] = name;
+    });
+    socket.emit("existing-users", existingUsers);
+
+    // Broadcast new user connection with both userId and userName
+    socket.to(roomId).broadcast.emit("user-connected", userId, finalName);
+
+    // Relay mute/unmute visual status changes across room participants
+    socket.on("user-toggle-audio", (isMuted) => {
+      socket.to(roomId).broadcast.emit("user-audio-changed", userId, isMuted);
+    });
+
+    socket.on("disconnect", () => {
+      if (socket.roomId && roomUsers.has(socket.roomId)) {
+        const uMap = roomUsers.get(socket.roomId);
+        uMap.delete(socket.userId);
+        if (uMap.size === 0) {
+          roomUsers.delete(socket.roomId);
+        }
+      }
+      socket.to(roomId).broadcast.emit("user-disconnected", userId);
+    });
+
     // SENIOR DEV FIX: Accept timestamp and replyToMessage parameters
     socket.on("message", (message, timestamp, replyToMessage) => {
       // SENIOR DEV FIX: Prevent DoS crash from object-injection (if hacker sends object payload instead of string)
@@ -82,7 +119,7 @@ io.on("connection", (socket) => {
       if (isDirty) {
         message = "<span style='color: red;'>🚨 Using bad word may ban your account permanantly</span>";
       }
-      
+
       // Emit full payload out so the Android WebView can show the reply bubble
       io.to(roomId).emit("createMessage", message, userName, timestamp, replyToMessage);
     });

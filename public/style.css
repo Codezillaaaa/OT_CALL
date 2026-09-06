@@ -21,6 +21,184 @@
   overflow: hidden;
   height: 100vh;
   display: flex;
+  flex-direction: column;
+}
+
+/* Participants Bar & Active Speaker UI */
+.participants-header {
+  background-color: #1a2332;
+  color: #ffffff;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2d3848;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.participants-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #a0aec0;
+}
+
+.users-counter-badge {
+  background-color: #2f80ec;
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: bold;
+}
+
+.participants-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 12px;
+  padding: 4px 2px 8px 2px;
+  scrollbar-width: thin;
+}
+
+.participants-grid::-webkit-scrollbar {
+  height: 4px;
+}
+
+.participants-grid::-webkit-scrollbar-thumb {
+  background-color: #4a5568;
+  border-radius: 2px;
+}
+
+.participant-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+  padding: 10px 12px;
+  background: #202b3c;
+  border-radius: 16px;
+  border: 2px solid transparent;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.participant-avatar-wrapper {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3a485e, #1e293b);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #ffffff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+/* Google Meet & Microsoft Teams Style Active Speaker Aura & Ripple */
+.participant-card.speaking {
+  border-color: #1a73e8; /* Google Meet / Teams Blue Glow */
+  background: #172436;
+  box-shadow: 0 0 15px rgba(26, 115, 232, 0.4);
+}
+
+.participant-card.speaking .participant-avatar-wrapper {
+  animation: meet-teams-pulse 1.4s infinite cubic-bezier(0.4, 0, 0.6, 1);
+  box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.6);
+}
+
+@keyframes meet-teams-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(26, 115, 232, 0.8), 0 0 0 0 rgba(0, 230, 118, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(26, 115, 232, 0.2), 0 0 12px rgba(0, 230, 118, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(26, 115, 232, 0), 0 0 0 0 rgba(0, 230, 118, 0);
+  }
+}
+
+/* Google Meet 3-Bar Equalizer Sound Wave Indicator */
+.speaking-waves {
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 16px;
+  margin-top: 6px;
+  padding: 0 4px;
+}
+
+.participant-card.speaking .speaking-waves {
+  display: flex;
+}
+
+.wave-bar {
+  width: 3.5px;
+  height: 4px;
+  background: linear-gradient(180deg, #00e676, #1a73e8);
+  border-radius: 4px;
+  transition: height 0.08s ease-in-out;
+  animation: teams-wave-bounce 0.8s infinite alternate cubic-bezier(0.45, 0.05, 0.55, 0.95);
+}
+
+.wave-bar:nth-child(1) { animation-delay: 0.1s; }
+.wave-bar:nth-child(2) { animation-delay: 0.3s; }
+.wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { animation-delay: 0.4s; }
+
+@keyframes teams-wave-bounce {
+  0% {
+    height: 4px;
+    background: #1a73e8;
+  }
+  50% {
+    height: 14px;
+    background: #00e676;
+  }
+  100% {
+    height: 8px;
+    background: #34a853;
+  }
+}
+
+.participant-name {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #f1f5f9;
+  margin-top: 6px;
+  white-space: nowrap;
+  max-width: 85px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.mute-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background-color: #ea4335;
+  color: white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #1a2332;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
 }
 
 .main__left {
