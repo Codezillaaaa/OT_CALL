@@ -41,6 +41,15 @@ function getAudioContext() {
   return audioCtx;
 }
 
+// Global user interaction triggers to unlock AudioContext on Mobile/WebView
+["touchstart", "touchend", "click", "keydown", "mousedown"].forEach(evt => {
+  document.addEventListener(evt, () => {
+    if (audioCtx && audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+  }, { passive: true });
+});
+
 // --- GLOBAL FUNCTIONS (Called by Android App) ---
 function toggleAudio(b) {
   if (!myVideoStream) return;
@@ -131,13 +140,23 @@ function removeParticipantCard(userId) {
   updateParticipantsCounter();
 }
 
-function setParticipantSpeakingUI(userId, isSpeaking) {
+function setParticipantSpeakingUI(userId, isSpeaking, dynamicHeights = null) {
   const card = document.getElementById(`participant-card-${userId}`);
   if (!card) return;
   if (isSpeaking) {
     card.classList.add("speaking");
   } else {
     card.classList.remove("speaking");
+  }
+
+  // Dynamically update wave bar heights if frequency data is provided
+  if (dynamicHeights && Array.isArray(dynamicHeights)) {
+    const waveBars = card.querySelectorAll(".wave-bar");
+    waveBars.forEach((bar, idx) => {
+      if (dynamicHeights[idx] !== undefined) {
+        bar.style.height = `${dynamicHeights[idx]}px`;
+      }
+    });
   }
 }
 
@@ -163,20 +182,17 @@ function updateParticipantsCounter() {
 // --- SETUP AUDIO VOLUME ANALYZER (RMS) ---
 function attachStreamAnalyzer(userId, stream) {
   try {
-    // Only attempt WebAudio analyzer if AudioContext is supported and running
     const ctx = getAudioContext();
     if (!ctx || ctx.state === "closed") return;
 
-    // Safety check for audio tracks
     const audioTracks = stream.getAudioTracks();
     if (!audioTracks || audioTracks.length === 0) return;
 
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.5;
+    analyser.fftSize = 128;
+    analyser.smoothingTimeConstant = 0.4;
     source.connect(analyser);
-    // Note: Do NOT connect source to ctx.destination to prevent duplicate audio/echo
 
     const pData = participantsMap.get(userId) || {};
     if (pData.analyserInterval) clearInterval(pData.analyserInterval);
@@ -193,18 +209,29 @@ function attachStreamAnalyzer(userId, stream) {
       try {
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
+        let maxVal = 0;
         for (let i = 0; i < bufferLength; i++) {
           sum += dataArray[i];
+          if (dataArray[i] > maxVal) maxVal = dataArray[i];
         }
         const average = sum / bufferLength;
 
-        // Threshold check for speech recognition
-        const isSpeaking = average > 10;
-        setParticipantSpeakingUI(userId, isSpeaking);
+        // Ultra-sensitive threshold check for speech (average > 2 or peak > 10)
+        const isSpeaking = average > 2 || maxVal > 10;
+
+        // Calculate dynamic wave bar heights for 4 equalizer bars
+        const heights = [
+          Math.max(4, Math.min(16, (dataArray[0] || 0) / 10)),
+          Math.max(4, Math.min(16, (dataArray[2] || 0) / 8)),
+          Math.max(4, Math.min(16, (dataArray[4] || 0) / 8)),
+          Math.max(4, Math.min(16, (dataArray[6] || 0) / 10))
+        ];
+
+        setParticipantSpeakingUI(userId, isSpeaking, isSpeaking ? heights : null);
       } catch (e) {
-        // Silently handle if track ends or context closes
+        // Handle stream end
       }
-    }, 150);
+    }, 100);
 
     pData.analyserInterval = interval;
     participantsMap.set(userId, pData);
