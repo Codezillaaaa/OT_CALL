@@ -179,6 +179,21 @@ function updateParticipantsCounter() {
   }
 }
 
+// Bridge helper to notify Native Android UI (RoomsCallAdapter) via WebAppInterface
+function notifyAndroidSpeaker(userId, volume) {
+  if (window.Android && typeof window.Android.speakerDetected === "function") {
+    const targetName = (userId === window.myPeerId) ? user : (participantsMap.get(userId)?.name || userId);
+    try {
+      window.Android.speakerDetected(targetName, volume);
+      if (targetName !== userId) {
+        window.Android.speakerDetected(userId, volume);
+      }
+    } catch (e) {
+      console.warn("Android speakerDetected bridge error:", e);
+    }
+  }
+}
+
 // --- SETUP AUDIO VOLUME ANALYZER (RMS) ---
 function attachStreamAnalyzer(userId, stream) {
   try {
@@ -203,6 +218,7 @@ function attachStreamAnalyzer(userId, stream) {
     const interval = setInterval(() => {
       if (pData.isMuted) {
         setParticipantSpeakingUI(userId, false);
+        notifyAndroidSpeaker(userId, 0);
         return;
       }
 
@@ -218,8 +234,9 @@ function attachStreamAnalyzer(userId, stream) {
 
         // Ultra-sensitive threshold check for speech (average > 2 or peak > 10)
         const isSpeaking = average > 2 || maxVal > 10;
+        const volume = isSpeaking ? Math.min(100, Math.max(30, Math.round(average * 5))) : 0;
 
-        // Calculate dynamic wave bar heights for 4 equalizer bars
+        // Calculate dynamic wave bar heights for 4 equalizer bars in web layout
         const heights = [
           Math.max(4, Math.min(16, (dataArray[0] || 0) / 10)),
           Math.max(4, Math.min(16, (dataArray[2] || 0) / 8)),
@@ -228,6 +245,9 @@ function attachStreamAnalyzer(userId, stream) {
         ];
 
         setParticipantSpeakingUI(userId, isSpeaking, isSpeaking ? heights : null);
+
+        // Bridge notification to Native Android UI (RoomsCallAdapter)
+        notifyAndroidSpeaker(userId, volume);
       } catch (e) {
         // Handle stream end
       }
