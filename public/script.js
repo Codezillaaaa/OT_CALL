@@ -163,14 +163,20 @@ function updateParticipantsCounter() {
 // --- SETUP AUDIO VOLUME ANALYZER (RMS) ---
 function attachStreamAnalyzer(userId, stream) {
   try {
+    // Only attempt WebAudio analyzer if AudioContext is supported and running
     const ctx = getAudioContext();
-    if (!ctx) return;
+    if (!ctx || ctx.state === "closed") return;
+
+    // Safety check for audio tracks
+    const audioTracks = stream.getAudioTracks();
+    if (!audioTracks || audioTracks.length === 0) return;
 
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.4;
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.5;
     source.connect(analyser);
+    // Note: Do NOT connect source to ctx.destination to prevent duplicate audio/echo
 
     const pData = participantsMap.get(userId) || {};
     if (pData.analyserInterval) clearInterval(pData.analyserInterval);
@@ -184,22 +190,26 @@ function attachStreamAnalyzer(userId, stream) {
         return;
       }
 
-      analyser.getByteFrequencyData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i];
-      }
-      const average = sum / bufferLength;
+      try {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
 
-      // Threshold check for speech recognition (RMS average > 12 out of 255)
-      const isSpeaking = average > 12;
-      setParticipantSpeakingUI(userId, isSpeaking);
-    }, 120);
+        // Threshold check for speech recognition
+        const isSpeaking = average > 10;
+        setParticipantSpeakingUI(userId, isSpeaking);
+      } catch (e) {
+        // Silently handle if track ends or context closes
+      }
+    }, 150);
 
     pData.analyserInterval = interval;
     participantsMap.set(userId, pData);
   } catch (e) {
-    console.warn(`Could not attach audio analyser for user ${userId}:`, e);
+    console.warn(`Audio analyser skipped for user ${userId}:`, e);
   }
 }
 
@@ -291,21 +301,22 @@ function attachStreamAnalyzer(userId, stream) {
     checkReadyToJoin();
   });
 
-  // --- AUDIO ONLY STREAM WITH ADVANCED DSP CONSTRAINTS ---
+  // --- AUDIO ONLY STREAM WITH BROADEST COMPATIBILITY ---
   const audioConstraints = {
-    echoCancellation: { ideal: true },
-    noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
-    sampleRate: 48000,
-    channelCount: 1,
-    googEchoCancellation: true,
-    googAutoGainControl: true,
-    googNoiseSuppression: true,
-    googHighpassFilter: true,
-    googTypingNoiseDetection: true
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
   };
 
-  navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
+  function initLocalStream(constraints) {
+    return navigator.mediaDevices.getUserMedia({ audio: constraints, video: false })
+      .catch((err) => {
+        console.warn("Standard constraints failed, trying basic audio:true fallback", err);
+        return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      });
+  }
+
+  initLocalStream(audioConstraints)
     .then((stream) => {
       myVideoStream = stream;
 
@@ -342,7 +353,7 @@ function attachStreamAnalyzer(userId, stream) {
     })
     .catch((err) => {
       console.error(`Mic Error: ${err.message}`);
-      alert("Microphone access is required for audio call: " + err.message);
+      alert("Microphone access failed: " + err.message);
     });
 
   function checkReadyToJoin() {
@@ -387,20 +398,27 @@ function attachStreamAnalyzer(userId, stream) {
   // --- AUDIO ELEMENT PLAY & UNMUTE OVERLAY HANDLER ---
   function addVideoStream(element, stream) {
     element.srcObject = stream;
-    element.addEventListener("loadedmetadata", () => {
-      // Resume Web Audio Context if needed
-      getAudioContext();
+    element.autoplay = true;
+    element.setAttribute("playsinline", "true");
+    element.volume = 1.0;
 
+    if (element.tagName === "AUDIO") {
+      document.body.append(element); 
+    } else {
+      if (videoGrid) videoGrid.append(element);
+    }
+
+    const tryPlay = () => {
       const playPromise = element.play();
       if (playPromise) {
         playPromise.catch(e => {
-          console.warn("Autoplay blocked. Showing UNMUTE button.", e);
+          console.warn("Autoplay blocked on mobile. Showing UNMUTE overlay.", e);
           if (document.getElementById("unmute-overlay")) return;
           
           const btn = document.createElement("div");
           btn.id = "unmute-overlay";
           btn.innerHTML = "🔊 <b>TAP TO UNMUTE AUDIO</b>";
-          btn.style.cssText = "position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9999; padding:12px 24px; background:#2f80ec; color:white; border-radius:30px; cursor:pointer; font-family:sans-serif; box-shadow:0 4px 15px rgba(0,0,0,0.3); font-size:0.9rem;";
+          btn.style.cssText = "position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9999; padding:14px 28px; background:#2f80ec; color:white; border-radius:30px; cursor:pointer; font-family:sans-serif; box-shadow:0 4px 15px rgba(0,0,0,0.4); font-size:1rem; font-weight:bold;";
           document.body.appendChild(btn);
           
           btn.onclick = () => { 
@@ -411,12 +429,12 @@ function attachStreamAnalyzer(userId, stream) {
           };
         });
       }
-      if (element.tagName === "AUDIO") {
-        document.body.append(element); 
-      } else {
-        if (videoGrid) videoGrid.append(element);
-      }
-    });
+    };
+
+    // Play immediately AND attach listeners for metadata/canplay
+    tryPlay();
+    element.onloadedmetadata = tryPlay;
+    element.oncanplay = tryPlay;
   }
   
   // --- CHAT FUNCTIONALITY ---
