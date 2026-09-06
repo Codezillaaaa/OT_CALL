@@ -180,12 +180,24 @@ function updateParticipantsCounter() {
 }
 
 // Bridge helper to notify Native Android UI (RoomsCallAdapter) via WebAppInterface
-function notifyAndroidSpeaker(userId, volume) {
+function notifyAndroidSpeaker(userId, volume, isLocal = false) {
   if (window.Android && typeof window.Android.speakerDetected === "function") {
-    const targetName = (userId === window.myPeerId) ? user : (participantsMap.get(userId)?.name || userId);
+    // Determine exact target name for Android's userPositionMap
+    let targetName = user;
+    if (!isLocal && userId !== window.myPeerId && userId !== "local") {
+      targetName = participantsMap.get(userId)?.name || userId;
+    }
+
     try {
+      // Always notify primary target username (e.g. "jaxrkxrmcx11")
       window.Android.speakerDetected(targetName, volume);
-      if (targetName !== userId) {
+
+      // If local user speaking, guarantee notification using local username 'user'
+      if (isLocal && user && user !== targetName) {
+        window.Android.speakerDetected(user, volume);
+      }
+      // Cover raw peer ID lookup variant
+      if (userId && userId !== targetName) {
         window.Android.speakerDetected(userId, volume);
       }
     } catch (e) {
@@ -195,7 +207,7 @@ function notifyAndroidSpeaker(userId, volume) {
 }
 
 // --- SETUP AUDIO VOLUME ANALYZER (RMS) ---
-function attachStreamAnalyzer(userId, stream) {
+function attachStreamAnalyzer(userId, stream, isLocal = false) {
   try {
     const ctx = getAudioContext();
     if (!ctx || ctx.state === "closed") return;
@@ -216,9 +228,13 @@ function attachStreamAnalyzer(userId, stream) {
     const dataArray = new Uint8Array(bufferLength);
 
     const interval = setInterval(() => {
-      if (pData.isMuted) {
+      // Direct track status check for local mic
+      const localTrack = isLocal && myVideoStream ? myVideoStream.getAudioTracks()[0] : null;
+      const isTrackMuted = isLocal ? (localTrack && !localTrack.enabled) : false;
+
+      if (pData.isMuted || isTrackMuted) {
         setParticipantSpeakingUI(userId, false);
-        notifyAndroidSpeaker(userId, 0);
+        notifyAndroidSpeaker(userId, 0, isLocal);
         return;
       }
 
@@ -247,7 +263,7 @@ function attachStreamAnalyzer(userId, stream) {
         setParticipantSpeakingUI(userId, isSpeaking, isSpeaking ? heights : null);
 
         // Bridge notification to Native Android UI (RoomsCallAdapter)
-        notifyAndroidSpeaker(userId, volume);
+        notifyAndroidSpeaker(userId, volume, isLocal);
       } catch (e) {
         // Handle stream end
       }
@@ -325,7 +341,7 @@ function attachStreamAnalyzer(userId, stream) {
       
       const remoteName = participantsMap.get(call.peer)?.name || "Participant";
       createOrUpdateParticipantCard(call.peer, remoteName, false);
-      attachStreamAnalyzer(call.peer, userVideoStream);
+      attachStreamAnalyzer(call.peer, userVideoStream, false);
     });
 
     call.on("close", () => {
@@ -367,10 +383,8 @@ function attachStreamAnalyzer(userId, stream) {
     .then((stream) => {
       myVideoStream = stream;
 
-      // Attach analyzer to local stream for active speaker indicator
-      if (window.myPeerId) {
-        attachStreamAnalyzer(window.myPeerId, stream);
-      }
+      // Always attach local microphone analyzer immediately
+      attachStreamAnalyzer("local", stream, true);
 
       // Socket Listeners for participant tracking
       socket.on("existing-users", (existingUsers) => {
@@ -406,6 +420,8 @@ function attachStreamAnalyzer(userId, stream) {
   function checkReadyToJoin() {
     if (window.myPeerId && myVideoStream) {
       console.log(`Ready state achieved. Joining room ${ROOM_ID}`);
+      createOrUpdateParticipantCard(window.myPeerId, user, true);
+      attachStreamAnalyzer(window.myPeerId, myVideoStream, true);
       setTimeout(() => {
         socket.emit("join-room", ROOM_ID, window.myPeerId, user);
       }, 500);
