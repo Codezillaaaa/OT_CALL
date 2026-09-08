@@ -34,15 +34,22 @@ app.get("/api/turn-credentials", (req, res) => {
         iceServers: [
           { urls: "stun:stun.l.google.com:19302" },
           { urls: "stun:stun1.l.google.com:19302" },
+          { urls: "stun:stun2.l.google.com:19302" },
+          { urls: "stun:stun3.l.google.com:19302" },
+          { urls: "stun:stun4.l.google.com:19302" },
           { urls: `turn:${host}:${turnPort}?transport=udp`, username, credential },
-          { urls: `turn:${host}:${turnPort}?transport=tcp`, username, credential }
+          { urls: `turn:${host}:${turnPort}?transport=tcp`, username, credential },
+          { urls: `turn:${host}:5349?transport=udp`, username, credential },
+          { urls: `turn:${host}:5349?transport=tcp`, username, credential }
         ]
       });
     }
     res.json({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" }
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun3.l.google.com:19302" }
       ]
     });
   } catch (e) {

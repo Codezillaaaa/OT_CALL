@@ -335,6 +335,22 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
     audio.autoplay = true;
     audio.setAttribute("playsinline", "true");
     
+    // Attach ICE connection state monitor for auto-healing on mobile networks
+    if (call.peerConnection) {
+      call.peerConnection.oniceconnectionstatechange = () => {
+        const state = call.peerConnection.iceConnectionState;
+        console.log(`ICE State (${call.peer}): ${state}`);
+        if (state === "failed" || state === "disconnected") {
+          console.warn(`ICE state ${state} for ${call.peer}. Attempting auto-restart...`);
+          try {
+            if (typeof call.peerConnection.restartIce === "function") {
+              call.peerConnection.restartIce();
+            }
+          } catch (e) {}
+        }
+      };
+    }
+
     call.on("stream", (userVideoStream) => {
       console.log("Connected to stream from: " + call.peer);
       addVideoStream(audio, userVideoStream);
@@ -383,6 +399,10 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
     .then((stream) => {
       myVideoStream = stream;
 
+      // Default local microphone track to MUTED until Android/user unmutes (Strict Listener Role Enforcement)
+      stream.getAudioTracks().forEach(track => { track.enabled = false; });
+      updateParticipantMuteUI("local", true);
+
       // Always attach local microphone analyzer immediately
       attachStreamAnalyzer("local", stream, true);
 
@@ -397,7 +417,8 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
       socket.on("user-connected", (userId, userName) => {
         console.log(`New user detected: ${userId} (${userName})`);
         createOrUpdateParticipantCard(userId, userName || "Participant", false);
-        setTimeout(() => connectToNewUser(userId, stream), 500);
+        // Deterministic calling or staggered delay to avoid glare condition
+        setTimeout(() => connectToNewUser(userId, stream), 600);
       });
 
       socket.on("user-audio-changed", (userId, isMuted) => {
@@ -428,31 +449,71 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
     }
   }
 
-  function connectToNewUser(userId, stream) {
-    console.log(`Calling ${userId}...`);
+  // Active call tracking to prevent duplicate/glare calls
+  const activeCalls = new Map();
+
+  function connectToNewUser(userId, stream, isRetry = false) {
+    if (activeCalls.has(userId) && !isRetry) {
+      console.log(`Call to ${userId} already active. Skipping duplicate call.`);
+      return;
+    }
+
+    console.log(`Calling ${userId}... (retry: ${isRetry})`);
     const call = peer.call(userId, stream);
+    if (!call) return;
+    activeCalls.set(userId, call);
     
     const audio = document.createElement("audio");
     audio.autoplay = true;
     audio.setAttribute("playsinline", "true");
 
+    let streamReceived = false;
+
+    // Attach ICE monitor to outbound call
+    if (call.peerConnection) {
+      call.peerConnection.oniceconnectionstatechange = () => {
+        const state = call.peerConnection.iceConnectionState;
+        console.log(`Outbound ICE State (${userId}): ${state}`);
+        if ((state === "failed" || state === "disconnected") && !streamReceived) {
+          console.warn(`ICE failed for outbound call to ${userId}. Triggering auto-retry...`);
+          if (!isRetry) {
+            setTimeout(() => connectToNewUser(userId, stream, true), 1000);
+          }
+        }
+      };
+    }
+
+    // Safety timeout: If no stream received after 4 seconds, retry once
+    const handshakeTimeout = setTimeout(() => {
+      if (!streamReceived && !isRetry) {
+        console.warn(`No audio stream received from ${userId} after 4s. Auto-retrying connection...`);
+        connectToNewUser(userId, stream, true);
+      }
+    }, 4000);
+
     call.on("stream", (userVideoStream) => {
+      streamReceived = true;
+      clearTimeout(handshakeTimeout);
       console.log(`Handshake successful with ${userId}`);
       addVideoStream(audio, userVideoStream);
       
       const remoteName = participantsMap.get(userId)?.name || "Participant";
       createOrUpdateParticipantCard(userId, remoteName, false);
-      attachStreamAnalyzer(userId, userVideoStream);
+      attachStreamAnalyzer(userId, userVideoStream, false);
     });
 
     call.on("close", () => {
       console.log(`Connection closed with ${userId}`);
+      clearTimeout(handshakeTimeout);
+      activeCalls.delete(userId);
       audio.remove();
       removeParticipantCard(userId);
     });
 
     call.on("error", (err) => {
       console.error(`Link failure with ${userId}:`, err);
+      clearTimeout(handshakeTimeout);
+      activeCalls.delete(userId);
       audio.remove();
       removeParticipantCard(userId);
     });
