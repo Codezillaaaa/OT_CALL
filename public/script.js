@@ -51,11 +51,16 @@ function getAudioContext() {
 });
 
 // --- GLOBAL FUNCTIONS (Called by Android App) ---
+let pendingAudioState = null;
+
 function toggleAudio(b) {
-  if (!myVideoStream) return;
+  const enabled = (b === "true" || b === true);
+  if (!myVideoStream) {
+    pendingAudioState = enabled;
+    return;
+  }
   const audioTrack = myVideoStream.getAudioTracks()[0];
   if (audioTrack) {
-    const enabled = (b === "true" || b === true);
     audioTrack.enabled = enabled;
     console.log(`Audio ${enabled ? 'Enabled' : 'Disabled (Muted)'}`);
     
@@ -399,9 +404,14 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
     .then((stream) => {
       myVideoStream = stream;
 
-      // Default local microphone track to MUTED until Android/user unmutes (Strict Listener Role Enforcement)
-      stream.getAudioTracks().forEach(track => { track.enabled = false; });
-      updateParticipantMuteUI("local", true);
+      // Apply pending audio state if Android called toggleAudio before stream was ready
+      // Otherwise default local microphone track to MUTED (Strict Listener Role Enforcement)
+      let initialMute = true;
+      if (pendingAudioState !== null) {
+        initialMute = !pendingAudioState;
+      }
+      stream.getAudioTracks().forEach(track => { track.enabled = !initialMute; });
+      updateParticipantMuteUI("local", initialMute);
 
       // Always attach local microphone analyzer immediately
       attachStreamAnalyzer("local", stream, true);
