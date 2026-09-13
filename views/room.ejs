@@ -10,6 +10,15 @@
   <script src="https://unpkg.com/peerjs@1.4.5/dist/peerjs.min.js"></script>
   <script>
     const ROOM_ID = "<%= roomId %>";
+    document.addEventListener("DOMContentLoaded", function() {
+      // If it's a 1-on-1 audio call (ROOM_ID doesn't start with 'gp' or 'grp'), hide the participants UI
+      if (!ROOM_ID.startsWith("gp") && !ROOM_ID.startsWith("grp")) {
+        const participantsHeader = document.querySelector(".participants-header");
+        if (participantsHeader) {
+          participantsHeader.style.display = "none";
+        }
+      }
+    });
   </script>
 </head>
 
