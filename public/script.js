@@ -309,11 +309,35 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
     secure: isSecure,
     config: { 
       iceServers: iceServers,
-      iceCandidatePoolSize: 10 
+      iceCandidatePoolSize: 10,
+      bundlePolicy: "max-bundle",
+      rtcpMuxPolicy: "require"
     }
   });
 
   window.myPeerId = null;
+
+  // Helper to optimize RTCRtpSender audio encoding parameters (Opus 32kbps bitrate constraint)
+  function optimizeAudioBitrate(pc) {
+    if (!pc || typeof pc.getSenders !== "function") return;
+    try {
+      pc.getSenders().forEach((sender) => {
+        if (sender.track && sender.track.kind === "audio") {
+          const params = sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+          }
+          // Optimal voice quality (32 kbps) without jitter/choking on WiFi/cellular networks
+          params.encodings[0].maxBitrate = 32000;
+          params.encodings[0].networkPriority = "high";
+          params.encodings[0].priority = "high";
+          sender.setParameters(params).catch(() => {});
+        }
+      });
+    } catch (e) {
+      console.warn("Sender bitrate optimization skipped:", e);
+    }
+  }
 
   // --- GLOBAL CALL HANDLER ---
   peer.on("call", (call) => {
@@ -340,8 +364,9 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
     audio.autoplay = true;
     audio.setAttribute("playsinline", "true");
     
-    // Attach ICE connection state monitor for auto-healing on mobile networks
+    // Attach ICE connection state monitor for auto-healing on mobile networks & WiFi switches
     if (call.peerConnection) {
+      optimizeAudioBitrate(call.peerConnection);
       call.peerConnection.oniceconnectionstatechange = () => {
         const state = call.peerConnection.iceConnectionState;
         console.log(`ICE State (${call.peer}): ${state}`);
@@ -389,7 +414,10 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
   const audioConstraints = {
     echoCancellation: true,
     noiseSuppression: true,
-    autoGainControl: true
+    autoGainControl: true,
+    highpassFilter: true,
+    channelCount: 1,
+    sampleRate: 48000
   };
 
   function initLocalStream(constraints) {
@@ -481,6 +509,7 @@ function attachStreamAnalyzer(userId, stream, isLocal = false) {
 
     // Attach ICE monitor to outbound call
     if (call.peerConnection) {
+      optimizeAudioBitrate(call.peerConnection);
       call.peerConnection.oniceconnectionstatechange = () => {
         const state = call.peerConnection.iceConnectionState;
         console.log(`Outbound ICE State (${userId}): ${state}`);
