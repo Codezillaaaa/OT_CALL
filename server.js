@@ -26,31 +26,31 @@ app.get("/api/turn-credentials", (req, res) => {
     const host = process.env.COTURN_HOST;
     const turnPort = process.env.COTURN_PORT || 3478;
 
+    const baseStun = [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" }
+    ];
+
     if (host && secret) {
       const expiry = Math.floor(Date.now() / 1000) + 24 * 3600;
       const username = `${expiry}:opentalk`;
       const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
       return res.json({
         iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-          { urls: "stun:stun2.l.google.com:19302" },
-          { urls: "stun:stun3.l.google.com:19302" },
-          { urls: "stun:stun4.l.google.com:19302" },
+          ...baseStun,
+          { urls: `stun:${host}:${turnPort}` },
           { urls: `turn:${host}:${turnPort}?transport=udp`, username, credential },
           { urls: `turn:${host}:${turnPort}?transport=tcp`, username, credential },
+          { urls: `turns:${host}:5349?transport=tcp`, username, credential },
           { urls: `turn:${host}:5349?transport=udp`, username, credential },
           { urls: `turn:${host}:5349?transport=tcp`, username, credential }
         ]
       });
     }
     res.json({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun2.l.google.com:19302" },
-        { urls: "stun:stun3.l.google.com:19302" }
-      ]
+      iceServers: baseStun
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
